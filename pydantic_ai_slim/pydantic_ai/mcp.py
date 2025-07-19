@@ -18,7 +18,7 @@ from typing_extensions import Self, assert_never, deprecated
 
 try:
     from mcp import types as mcp_types
-    from mcp.client.session import ClientSession, LoggingFnT
+    from mcp.client.session import ClientSession, ElicitationFnT, LoggingFnT
     from mcp.client.sse import sse_client
     from mcp.client.stdio import StdioServerParameters, stdio_client
     from mcp.client.streamable_http import GetSessionIdCallback, streamablehttp_client
@@ -50,6 +50,8 @@ class MCPServer(ABC):
     timeout: float = 5
     process_tool_call: ProcessToolCallback | None = None
     allow_sampling: bool = True
+    allow_elicitation: bool = True
+    elicitation_callback: ElicitationFnT | None = None
     # } end of "abstract fields"
 
     _running_count: int = 0
@@ -158,6 +160,7 @@ class MCPServer(ABC):
                 read_stream=self._read_stream,
                 write_stream=self._write_stream,
                 sampling_callback=self._sampling_callback if self.allow_sampling else None,
+                elicitation_callback=self.elicitation_callback,
                 logging_callback=self.log_handler,
             )
             self._client = await self._exit_stack.enter_async_context(client)
@@ -237,8 +240,14 @@ class MCPServer(ABC):
                     data=base64.b64decode(resource.blob),
                     media_type=resource.mimeType or 'application/octet-stream',
                 )
+            elif isinstance(resource, mcp_types.ResourceLink):
+                # Return the URI as text for ResourceLink
+                return str(resource.uri)
             else:
                 assert_never(resource)
+        elif isinstance(part, mcp_types.ResourceLink):
+            # Handle ResourceLink as a top-level content type
+            return str(part.uri)
         else:
             assert_never(part)
 
@@ -326,6 +335,12 @@ class MCPServerStdio(MCPServer):
 
     allow_sampling: bool = True
     """Whether to allow MCP sampling through this client."""
+
+    allow_elicitation: bool = True
+    """Whether to allow MCP elicitation through this client."""
+
+    elicitation_callback: ElicitationFnT | None = None
+    """Callback function to handle elicitation requests from the server."""
 
     @asynccontextmanager
     async def client_streams(
@@ -421,6 +436,12 @@ class _MCPServerHTTP(MCPServer):
 
     allow_sampling: bool = True
     """Whether to allow MCP sampling through this client."""
+
+    allow_elicitation: bool = True
+    """Whether to allow MCP elicitation through this client."""
+
+    elicitation_callback: ElicitationFnT | None = None
+    """Callback function to handle elicitation requests from the server."""
 
     @property
     @abstractmethod
